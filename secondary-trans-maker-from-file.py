@@ -52,17 +52,17 @@ def load_program():
     global df_filter
     global df_caps
 
-    # User picks program file, return if user cancels fialdialog
+    # User picks program file, return if user cancels fialdialog ''
     program_file = filedialog.askopenfilenames()
     if program_file == '': return
     program_file = program_file[0]
+
+    # extract folder and program name
     program_folder = os.path.dirname(program_file)
-    program_name = program_folder.split('/')[-1]
-    message += 'Program name\n   {}\n'.format(program_name)   
 
     # Process each sheet in workbook
     try:
-        df_event = pd.read_excel(program_file, sheet_name='tbl_Event')
+        df_event = pd.read_excel(program_file, sheet_name='tbl_Event',)
         df_filter = pd.read_excel(program_file, sheet_name='tbl_Master_Filter')
         df_caps = pd.read_excel(program_file, sheet_name='tbl_Pog_Capacity')
         message += '\nSuccessfully loaded data from\n   {}\n'.format(os.path.basename(program_file))
@@ -70,8 +70,16 @@ def load_program():
         message += '   {} in Event Data\n'.format(df_event.shape)
         message += '   {} in Store Data\n'.format(df_filter.shape)
         message += '   {} in Capacity Data\n'.format(df_caps.shape)
+        message += '\nFilter sizes {}'.format(df_filter['BA_Filter'].unique())
+        message += '          Caps sizes {}\n'.format(df_caps['Size'].unique())
     except:
         message += '\nFailed to load data from\n   {}\n'.format(os.path.basename(program_file))
+
+    # check kraft filter for not null, then drop column
+    if not(df_filter['Kraft_Filter'].isna().all()):
+        message += '\nSTOP! Kraft_Filter is not null.\nDo this program manually.'
+        print_message(message, False)
+    df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
 
     # some stats about the program
     prog_size = len(list(df_event.Half.unique()))
@@ -90,18 +98,20 @@ def produce_file():
     global date_2
     message = ''
 
-    # clean data
+    # clean data. Prepare for matching BA_Filter to Size.
     df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
-    df_caps['Size'] = df_caps['Size'].astype(object)
+    df_filter = df_filter.dropna()
+
+    print('\n{}\n{}\n{}\n'.format('CAPS '*20,df_caps['Size'].unique(),df_caps.dtypes['Size']))
+    print('\n{}\n{}\n{}\n'.format('FLTR '*20,df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
+
+    # df_caps['Size'] = df_caps['Size'].astype(int)
     df_caps['Size'] = df_caps['Size'].str.upper()
-    df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(object)
+    # df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(int)
     df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
 
-    # check kraft filter for not null, then drop columns
-    if not(df_filter['Kraft_Filter'].isna().all()):
-        message += '\nSTOP! Kraft_Filter is not null.\nDo this program manually.'
-        print_message(message, False)
-    df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
+    print('\n{}\n{}\n{}\n'.format('CAPS '*20,df_caps['Size'].unique(),df_caps.dtypes['Size']))
+    print('\n{}\n{}\n{}\n'.format('FLTR '*20,df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
 
     # calculate secondary capacity, then drop columns
     df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
@@ -115,6 +125,7 @@ def produce_file():
 
         # join the stores and items where half
         df_trans_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        
         # drop columns not needed in transmission file
         df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
 
@@ -143,12 +154,14 @@ def produce_file():
         # copy out file from in
         df_trans_out = df_trans_in.copy()
         df_trans_out['STR_MAINT_NUM'] = 0
-        df_trans_out['PRCS_TS'] = date_1+':03:49:00 PM'
+        p_out = date_1+':03:49:00 PM'
+        df_trans_out['PRCS_TS'] = p_out
 
         # save files
         fp = program_folder + '/' + df_event.iloc[0,2]
         df_trans_in.to_csv('{} IN.txt'.format(fp), sep='\t', index=False)
         df_trans_out.to_csv('{} OUT.txt'.format(fp), sep='\t', index=False)
+        message += '\nIN {}          OUT {}\n'.format(p_in, p_out)        
         message += '\n\nIn-file saved to\n   {} IN.txt\n   # of rows = {}'.format(fp,df_trans_in.shape[0])
         message += '\n\nOut-file saved to\n   {} OUT.txt\n   # of rows = {}'.format(fp,df_trans_out.shape[0])
 
@@ -158,8 +171,8 @@ def produce_file():
             print_message(message, False)
             return
 
-        df_first_items_only = pd.read_excel(program_file, sheet_name='Items on Only First Half', usecols='A')
-        df_second_items_only = pd.read_excel(program_file, sheet_name='Items on Only Second Half', usecols='A')
+        df_first_items_only = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
+        df_second_items_only = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
 
         # join the stores and items where half
         df_trans_first_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
