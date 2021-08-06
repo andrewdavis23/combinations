@@ -88,7 +88,7 @@ def load_program():
         df_filter = df_filter.dropna()
 
         # PREPROCESS: Calculate secondary capacity, then drop columns
-        df_caps['Sec_Cap'] = df_caps.apply(sec_logic_1, axis=1)
+        df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
         df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
 
         # CLEAN 3: make sure key columns are same datatype prior to merge
