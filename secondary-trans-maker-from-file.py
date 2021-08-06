@@ -32,6 +32,12 @@ def standard_sec_logic(row):
     else:
         return row['CasePack'] * 2
 
+def sec_logic_1(row):
+    if row['CasePack'] == 1:
+        return 60
+    else:
+        return row['CasePack'] * 5
+
 def print_message(message, delete):
     if delete:
         files_txt.config(state=NORMAL)
@@ -70,16 +76,40 @@ def load_program():
         message += '   {} in Event Data\n'.format(df_event.shape)
         message += '   {} in Store Data\n'.format(df_filter.shape)
         message += '   {} in Capacity Data\n'.format(df_caps.shape)
+
+        # CLEAN 1: Check kraft filter for not null, then drop column
+        if not(df_filter['Kraft_Filter'].isna().all()):
+            message += '\nSTOP! Kraft_Filter is not null.\nDo this program manually.'
+            print_message(message, False)
+        df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
+
+        # CLEAN 2: Prepare for matching BA_Filter to Size.
+        df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
+        df_filter = df_filter.dropna()
+
+        # PREPROCESS: Calculate secondary capacity, then drop columns
+        df_caps['Sec_Cap'] = df_caps.apply(sec_logic_1, axis=1)
+        df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+
+        # CLEAN 3: make sure key columns are same datatype prior to merge
+        print('\n{}{}\n{}\n{}\n'.format('CAPS '*3,' before ',df_caps['Size'].unique(),df_caps.dtypes['Size']))
+        print('\n{}{}\n{}\n{}\n'.format('FLTR '*3,' before ',df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
+
+        df_caps['Size'] = df_caps['Size'].astype(int)
+        # df_caps['Size'] = df_caps['Size'].str.upper()
+        # df_caps['Size'] = df_caps['Size'].astype(str).str.upper()
+        df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(int)
+        # df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
+        # df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(str).str.upper()
+
+        print('\n{}{}\n{}\n{}\n'.format('CAPS '*3,' after ',df_caps['Size'].unique(),df_caps.dtypes['Size']))
+        print('\n{}{}\n{}\n{}\n'.format('FLTR '*3,' after ',df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
+
         message += '\nFilter sizes {}'.format(df_filter['BA_Filter'].unique())
         message += '          Caps sizes {}\n'.format(df_caps['Size'].unique())
-    except:
-        message += '\nFailed to load data from\n   {}\n'.format(os.path.basename(program_file))
+    except BaseException as em:
+        message += '\nFailed to load data from\n   {}\n   Error: {}\n'.format(os.path.basename(program_file), em)
 
-    # check kraft filter for not null, then drop column
-    if not(df_filter['Kraft_Filter'].isna().all()):
-        message += '\nSTOP! Kraft_Filter is not null.\nDo this program manually.'
-        print_message(message, False)
-    df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
 
     # some stats about the program
     prog_size = len(list(df_event.Half.unique()))
@@ -98,24 +128,14 @@ def produce_file():
     global date_2
     message = ''
 
-    # clean data. Prepare for matching BA_Filter to Size.
-    df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
-    df_filter = df_filter.dropna()
+    # # # moved to load_program()
+    # # clean data. Prepare for matching BA_Filter to Size.
+    # df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
+    # df_filter = df_filter.dropna()
 
-    print('\n{}\n{}\n{}\n'.format('CAPS '*20,df_caps['Size'].unique(),df_caps.dtypes['Size']))
-    print('\n{}\n{}\n{}\n'.format('FLTR '*20,df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
-
-    # df_caps['Size'] = df_caps['Size'].astype(int)
-    df_caps['Size'] = df_caps['Size'].str.upper()
-    # df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(int)
-    df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
-
-    print('\n{}\n{}\n{}\n'.format('CAPS '*20,df_caps['Size'].unique(),df_caps.dtypes['Size']))
-    print('\n{}\n{}\n{}\n'.format('FLTR '*20,df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
-
-    # calculate secondary capacity, then drop columns
-    df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
-    df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+    # # calculate secondary capacity, then drop columns
+    # df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
+    # df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
 
     if prog_size == 1:
         if date_1 == '':
@@ -171,17 +191,18 @@ def produce_file():
             print_message(message, False)
             return
 
-        df_first_items_only = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
-        df_second_items_only = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
+        halves = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
+        first_in = list(halves[(halves['Half']=='First') & (halves['Half']=='Both')])
+        first_out = list(halves[halves['Half']=='First'])
+        second_in = list(halves[halves['Half']=='Second'])
+        second_out = list(halves[(halves['Half']=='Second') & (halves['Half']=='Both')])
 
         # join the stores and items where half
-        df_trans_first_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
-        # df_trans_first_out =
-        # only_1 = df[df['half']==1]. merge(df[df['half']==2],how='left',on='item')
-        # only_1 = only_1[only_1['half_y'].isna()]
-        # df_trans_second_in = 
-        df_trans_second_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
-        
+        df_trans_first_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1) & (df_caps['ItemNum'] in first_in)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_first_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1) & (df_caps['ItemNum'] in first_out)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_second_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2) & (df_caps['ItemNum'] in second_in)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_second_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2) & (df_caps['ItemNum'] in second_out)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+
         # drop columns not needed in transmission file
         df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
 
