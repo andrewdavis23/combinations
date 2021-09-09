@@ -68,10 +68,10 @@ def load_program():
 
     # Process each sheet in workbook
     try:
-        df_event = pd.read_excel(program_file, sheet_name='tbl_Event',)
-        df_filter = pd.read_excel(program_file, sheet_name='tbl_Master_Filter')
-        df_caps = pd.read_excel(program_file, sheet_name='tbl_Pog_Capacity')
-        message += '\nSuccessfully loaded data from\n   {}\n'.format(os.path.basename(program_file))
+        df_event = pd.read_excel(program_file, sheet_name='tbl_Event')
+        df_filter = pd.read_excel(program_file, sheet_name='tbl_Master_Filter', dtype={'BA_Filter':str})
+        df_caps = pd.read_excel(program_file, sheet_name='tbl_Pog_Capacity', dtype={'Size':str})
+        message += f'Program loaded: {df_event.iloc[0,2]}'
         message += '\n# of (rows, columns) loaded:\n'
         message += '   {} in Event Data\n'.format(df_event.shape)
         message += '   {} in Store Data\n'.format(df_filter.shape)
@@ -83,33 +83,24 @@ def load_program():
             print_message(message, False)
         df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
 
-        # CLEAN 2: Prepare for matching BA_Filter to Size.
+        # CLEAN 2: Remove stores that are not part of the program
         df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
         df_filter = df_filter.dropna()
 
-        # PREPROCESS: Calculate secondary capacity, then drop columns
+        # CLEAN 3: In the case where size A = 'Yes' and size B = 'YES'
+        df_caps['Size'] = df_caps['Size'].str.upper()
+        df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
+
+        # PREPROCESS: Calculate secondary capacity from capacity, casepack then drop columns
         df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
         df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
 
-        # CLEAN 3: make sure key columns are same datatype prior to merge
-        print('\n{}{}\n{}\n{}\n'.format('CAPS '*3,' before ',df_caps['Size'].unique(),df_caps.dtypes['Size']))
-        print('\n{}{}\n{}\n{}\n'.format('FLTR '*3,' before ',df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
+        # Show the user data types and category values prior to merging the tables on store-size category
+        message += '\n   Filter sizes: {} Data type: {}'.format(df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter'])
+        message += '\n   Caps sizes: {} Data type: {}\n'.format(df_caps['Size'].unique(),df_caps.dtypes['Size'])
 
-        df_caps['Size'] = df_caps['Size'].astype(int)
-        # df_caps['Size'] = df_caps['Size'].str.upper()
-        # df_caps['Size'] = df_caps['Size'].astype(str).str.upper()
-        df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(int)
-        # df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
-        # df_filter['BA_Filter'] = df_filter['BA_Filter'].astype(str).str.upper()
-
-        print('\n{}{}\n{}\n{}\n'.format('CAPS '*3,' after ',df_caps['Size'].unique(),df_caps.dtypes['Size']))
-        print('\n{}{}\n{}\n{}\n'.format('FLTR '*3,' after ',df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter']))
-
-        message += '\nFilter sizes {}'.format(df_filter['BA_Filter'].unique())
-        message += '          Caps sizes {}\n'.format(df_caps['Size'].unique())
     except BaseException as em:
-        message += '\nFailed to load data from\n   {}\n   Error: {}\n'.format(os.path.basename(program_file), em)
-
+        message += '\n\tError: {}\n'.format(em)
 
     # some stats about the program
     prog_size = len(list(df_event.Half.unique()))
@@ -128,20 +119,14 @@ def produce_file():
     global date_2
     message = ''
 
-    # # # moved to load_program()
-    # # clean data. Prepare for matching BA_Filter to Size.
-    # df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
-    # df_filter = df_filter.dropna()
-
-    # # calculate secondary capacity, then drop columns
-    # df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
-    # df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
-
     if prog_size == 1:
         if date_1 == '':
             message += 'ENTER OUT DATE 1 (USE EVENING REMOVAL DATE)'
             print_message(message, False)
             return
+        else:
+            # subtracts one day (program goes in evening prior)
+            date_1 = date_1[0:8]+str(int(date_1[-2:])-1)
 
         # join the stores and items where half
         df_trans_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
@@ -181,9 +166,9 @@ def produce_file():
         fp = program_folder + '/' + df_event.iloc[0,2]
         df_trans_in.to_csv('{} IN.txt'.format(fp), sep='\t', index=False)
         df_trans_out.to_csv('{} OUT.txt'.format(fp), sep='\t', index=False)
-        message += '\nIN {}          OUT {}\n'.format(p_in, p_out)        
-        message += '\n\nIn-file saved to\n   {} IN.txt\n   # of rows = {}'.format(fp,df_trans_in.shape[0])
-        message += '\n\nOut-file saved to\n   {} OUT.txt\n   # of rows = {}'.format(fp,df_trans_out.shape[0])
+        message += '\nIN {}          OUT {}'.format(p_in, p_out)        
+        message += '\n\nIN-file saved to\n   {} IN.txt\n   # of rows = {}'.format(fp,df_trans_in.shape[0])
+        message += '\n\nOUT-file saved to\n   {} OUT.txt\n   # of rows = {}'.format(fp,df_trans_out.shape[0])
 
     elif prog_size == 2:
         if date_1 == '' | date_2 == '':
@@ -204,7 +189,7 @@ def produce_file():
         df_trans_second_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2) & (df_caps['ItemNum'] in second_out)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
 
         # drop columns not needed in transmission file
-        df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
+        # df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
 
     else:
         message += '\nProgram size not 1 or 2. Prep this one manually.\n'
