@@ -19,6 +19,8 @@ in_out = 0
 prog_size = 0
 program_folder = ''
 program_file = ''
+# CHANGE THIS MANUALLY - RADIO BUTTONS NOT WORKING
+sec_logic = 2
 
 df_event = pd.DataFrame()
 df_filter = pd.DataFrame()
@@ -92,15 +94,23 @@ def load_program():
         df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
 
         # PREPROCESS: Calculate secondary capacity from capacity, casepack then drop columns
-        df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
-        df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+        if sec_logic == 1:
+            df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
+            df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+            message += '\n   Standard Secondary Logic Used'
+        elif sec_logic == 2:
+            df_caps['Sec_Cap'] = df_caps.apply(sec_logic_1, axis=1)
+            df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+            message += '\n   Alt Secondary Logic #1 Used'
+        else:
+            message += '\n   Choice of secondary logic is not coded into program.'
 
         # Show the user data types and category values prior to merging the tables on store-size category
         message += '\n   Filter sizes: {} Data type: {}'.format(df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter'])
         message += '\n   Caps sizes: {} Data type: {}\n'.format(df_caps['Size'].unique(),df_caps.dtypes['Size'])
 
     except BaseException as em:
-        message += '\n\tError: {}\n'.format(em)
+        message += '\nLoad Fail\n\tException Error: {}\n'.format(em)
 
     # some stats about the program
     prog_size = len(list(df_event.Half.unique()))
@@ -222,7 +232,10 @@ right_up.grid(row=0, column=0)
 right_down = Frame(right_frame)
 right_down.grid(row=1, column=0)
 
-cal = Calendar(left_frame, selectmode='day', date_pattern='yyyy/mm/dd', year=current_year, month=current_month, day=current_day)
+# LEFT FRAME
+
+cal = Calendar(left_frame, selectmode='day', date_pattern='yyyy/mm/dd',
+        year=current_year, month=current_month, day=current_day)
 cal.grid(row=0, column=0, columnspan=2)
 
 butt_1 = Button(left_frame, text='Select Out Date - Half 1', command=get_date_1)
@@ -236,6 +249,27 @@ out_label_1.grid(row=1, column=0)
 
 out_label_2 = Label(left_frame, text='')
 out_label_2.grid(row=2, column=0)
+    
+# R1 = Radiobutton(left_frame, text = 'Standard Logic', variable = sec_logic,
+#         value = 1, indicator = 1,
+#         background = "light blue")
+# R1.grid(row=3, column=0)
+
+# R2 = Radiobutton(left_frame, text = 'Alternate Logic', variable = sec_logic,
+#         value = 2, indicator = 1,
+#         background = "light blue")
+# R2.grid(row=3, column=1)
+
+L1 = 'Standard Logic:\n  PK=1 -> SEC=PK*3\n  PK*2>CAP -> SEC=PK\n  Else SEC=PK*2'
+L2 = 'Alt Logic #1:\n  PK=1 -> SEC=60\n  Else SEC=PK*5'
+
+L1 = Label(left_frame, text=L1)
+L2 = Label(left_frame, text=L2)
+
+L1.grid(row=4, column=0)
+L2.grid(row=4, column=1)
+
+# RIGHT FRAME
 
 files_txt = Text(right_up)
 files_txt.pack()
