@@ -3,6 +3,7 @@ from tkinter import *
 from tkcalendar import *
 from tkinter import filedialog
 from datetime import date
+from datetime import timedelta
 import pandas as pd
 import os
 
@@ -12,19 +13,19 @@ import os
 current_year = date.today().year
 current_month = date.today().month
 current_day = date.today().day
-date_1 = ''
-date_2 = ''
+date_1 = date(1,1,1)
+date_2 = date(1,1,1)
 
 in_out = 0
 prog_size = 0
 program_folder = ''
 program_file = ''
 # CHANGE THIS MANUALLY - RADIO BUTTONS NOT WORKING
-sec_logic = 2
+sec_logic = 1
 
 df_event = pd.DataFrame()
-df_filter = pd.DataFrame()
-df_caps = pd.DataFrame()
+df_store = pd.DataFrame()
+df_item = pd.DataFrame()
 
 def standard_sec_logic(row):
     if row['CasePack'] == 1:
@@ -57,8 +58,8 @@ def load_program():
     global program_folder
     global program_file
     global df_event
-    global df_filter
-    global df_caps
+    global df_store
+    global df_item
 
     # User picks program file, return if user cancels fialdialog ''
     program_file = filedialog.askopenfilenames()
@@ -71,43 +72,43 @@ def load_program():
     # Process each sheet in workbook
     try:
         df_event = pd.read_excel(program_file, sheet_name='tbl_Event')
-        df_filter = pd.read_excel(program_file, sheet_name='tbl_Master_Filter', dtype={'BA_Filter':str})
-        df_caps = pd.read_excel(program_file, sheet_name='tbl_Pog_Capacity', dtype={'Size':str})
+        df_store = pd.read_excel(program_file, sheet_name='tbl_Master_Filter', dtype={'BA_Filter':str})
+        df_item = pd.read_excel(program_file, sheet_name='tbl_Pog_Capacity', dtype={'Size':str})
         message += f'Program loaded: {df_event.iloc[0,2]}'
         message += '\n# of (rows, columns) loaded:\n'
         message += '   {} in Event Data\n'.format(df_event.shape)
-        message += '   {} in Store Data\n'.format(df_filter.shape)
-        message += '   {} in Capacity Data\n'.format(df_caps.shape)
+        message += '   {} in Store Data\n'.format(df_store.shape)
+        message += '   {} in Item Capacity Data\n'.format(df_item.shape)
 
         # CLEAN 1: Check kraft filter for not null, then drop column
-        if not(df_filter['Kraft_Filter'].isna().all()):
+        if not(df_store['Kraft_Filter'].isna().all()):
             message += '\nSTOP! Kraft_Filter is not null.\nDo this program manually.'
             print_message(message, False)
-        df_filter = df_filter.drop(['Kraft_Filter'], axis=1)
+        df_store = df_store.drop(['Kraft_Filter'], axis=1)
 
         # CLEAN 2: Remove stores that are not part of the program
-        df_filter = df_filter[df_filter['BA_Filter'] != 'NO']
-        df_filter = df_filter.dropna()
+        df_store = df_store[df_store['BA_Filter'] != 'NO']
+        df_store = df_store.dropna()
 
         # CLEAN 3: In the case where size A = 'Yes' and size B = 'YES'
-        df_caps['Size'] = df_caps['Size'].str.upper()
-        df_filter['BA_Filter'] = df_filter['BA_Filter'].str.upper()
+        df_item['Size'] = df_item['Size'].str.upper()
+        df_store['BA_Filter'] = df_store['BA_Filter'].str.upper()
 
         # PREPROCESS: Calculate secondary capacity from capacity, casepack then drop columns
         if sec_logic == 1:
-            df_caps['Sec_Cap'] = df_caps.apply(standard_sec_logic, axis=1)
-            df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+            df_item['Sec_Cap'] = df_item.apply(standard_sec_logic, axis=1)
+            df_item = df_item.drop(['Capacity','CasePack'], axis=1)
             message += '\n   Standard Secondary Logic Used'
         elif sec_logic == 2:
-            df_caps['Sec_Cap'] = df_caps.apply(sec_logic_1, axis=1)
-            df_caps = df_caps.drop(['Capacity','CasePack'], axis=1)
+            df_item['Sec_Cap'] = df_item.apply(sec_logic_1, axis=1)
+            df_item = df_item.drop(['Capacity','CasePack'], axis=1)
             message += '\n   Alt Secondary Logic #1 Used'
         else:
             message += '\n   Choice of secondary logic is not coded into program.'
 
         # Show the user data types and category values prior to merging the tables on store-size category
-        message += '\n   Filter sizes: {} Data type: {}'.format(df_filter['BA_Filter'].unique(),df_filter.dtypes['BA_Filter'])
-        message += '\n   Caps sizes: {} Data type: {}\n'.format(df_caps['Size'].unique(),df_caps.dtypes['Size'])
+        message += '\n   Store Size Categories: {} Data type: {}'.format(df_store['BA_Filter'].unique(),df_store.dtypes['BA_Filter'])
+        message += '\n   Item Size Categories : {} Data type: {}\n'.format(df_item['Size'].unique(),df_item.dtypes['Size'])
 
     except BaseException as em:
         message += '\nLoad Fail\n\tException Error: {}\n'.format(em)
@@ -123,8 +124,8 @@ def produce_file():
     global program_folder
     global prog_size
     global df_event
-    global df_filter
-    global df_caps
+    global df_store
+    global df_item
     global date_1
     global date_2
     message = ''
@@ -136,10 +137,10 @@ def produce_file():
             return
         else:
             # subtracts one day (program goes in evening prior)
-            date_1 = date_1[0:8]+str(int(date_1[-2:])-1)
+            date_1 = date_1 - timedelta(days=1)
 
         # join the stores and items where half
-        df_trans_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_in = pd.merge(df_item.loc[(df_item['Sec_Cap']>0) & (df_item['Half']==1)], df_store, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
         
         # drop columns not needed in transmission file
         df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
@@ -157,10 +158,8 @@ def produce_file():
         #'2020/12/17:03:49:00 PM' pd.datetime being buggy
         # will have to get using look up half=2....
         p_start = df_event.iloc[0,0]
-        p_year = str(p_start.year)
-        p_month = str(p_start.month).rjust(2,'0')
-        p_day = str(p_start.day-1).rjust(2,'0')
-        p_in = p_year+'/'+p_month+'/'+p_day+':03:49:00 PM'
+        p_start = p_start - timedelta(days=1)
+        p_in = p_start.strftime('%Y/%m/%d')+':03:49:00 PM'
         df_trans_in['PRCS_TS'] = p_in
 
         # reorder columns
@@ -169,11 +168,11 @@ def produce_file():
         # copy out file from in
         df_trans_out = df_trans_in.copy()
         df_trans_out['STR_MAINT_NUM'] = 0
-        p_out = date_1+':03:49:00 PM'
+        p_out = date_1.strftime('%Y/%m/%d')+':03:49:00 PM'
         df_trans_out['PRCS_TS'] = p_out
 
         # save files
-        fp = program_folder + '/' + df_event.iloc[0,2]
+        fp = os.path.dirname(program_folder) + '/in and out files/' + df_event.iloc[0,2]
         df_trans_in.to_csv('{} IN.txt'.format(fp), sep='\t', index=False)
         df_trans_out.to_csv('{} OUT.txt'.format(fp), sep='\t', index=False)
         message += '\nIN {}          OUT {}'.format(p_in, p_out)        
@@ -185,6 +184,10 @@ def produce_file():
             message += 'ENTER OUT DATE 1 (USE EVENING REMOVAL DATE)'
             print_message(message, False)
             return
+        else:
+            # subtracts one day (program goes in evening prior)
+            date_1 = date_1 - timedelta(days=1)
+            date_2 = date_2 - timedelta(days=1)
 
         halves = pd.read_excel(program_file, sheet_name='Items by Half', usecols='A:B')
         first_in = list(halves[(halves['Half']=='First') & (halves['Half']=='Both')])
@@ -193,10 +196,10 @@ def produce_file():
         second_out = list(halves[(halves['Half']=='Second') & (halves['Half']=='Both')])
 
         # join the stores and items where half
-        df_trans_first_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1) & (df_caps['ItemNum'] in first_in)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
-        df_trans_first_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==1) & (df_caps['ItemNum'] in first_out)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
-        df_trans_second_in = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2) & (df_caps['ItemNum'] in second_in)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
-        df_trans_second_out = pd.merge(df_caps.loc[(df_caps['Sec_Cap']>0) & (df_caps['Half']==2) & (df_caps['ItemNum'] in second_out)], df_filter, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_first_in = pd.merge(df_item.loc[(df_item['Sec_Cap']>0) & (df_item['Half']==1) & (df_item['ItemNum'] in first_in)], df_store, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_first_out = pd.merge(df_item.loc[(df_item['Sec_Cap']>0) & (df_item['Half']==1) & (df_item['ItemNum'] in first_out)], df_store, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_second_in = pd.merge(df_item.loc[(df_item['Sec_Cap']>0) & (df_item['Half']==2) & (df_item['ItemNum'] in second_in)], df_store, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
+        df_trans_second_out = pd.merge(df_item.loc[(df_item['Sec_Cap']>0) & (df_item['Half']==2) & (df_item['ItemNum'] in second_out)], df_store, how='inner', left_on=['Division','Size'], right_on=['Div','BA_Filter'])
 
         # drop columns not needed in transmission file
         # df_trans_in = df_trans_in.drop(['Half','Size','Division','Div','BA_Filter'], axis=1)
@@ -208,12 +211,12 @@ def produce_file():
 
 def get_date_1():
     global date_1
-    date_1 = cal.get_date()
+    date_1 = cal.selection_get()
     out_label_1.config(text=date_1)
    
 def get_date_2():
     global date_2
-    date_2 = cal.get_date()
+    date_2 = cal.selection_get()
     out_label_2.config(text=date_2)
 
 root = Tk()
